@@ -31,13 +31,14 @@ MAX_SIZE_ON_WIRE = ETH_II_PAYLOAD - IP_HEADER_LENGTH - UDP_HEADER_LENGTH
 
 FORMAT_HLAVICKY_DAT = "IIhc"
 VELKOST_HLAVICKY_DAT = struct.calcsize(FORMAT_HLAVICKY_DAT)
+MAX_DATA_SIZE = MAX_SIZE_ON_WIRE - VELKOST_HLAVICKY_DAT
 
 crc32_func = crcmod.mkCrcFun(0x104c11db7, initCrc=0, xorOut=0xFFFFFFFF)
 
 
 def vytvor_datovy_paket(poradove_cislo, velkost_dat, data, chyba = False):
     crc = 0
-    flag = b'0'
+    flag = b'a'
     hlavicka = struct.pack(FORMAT_HLAVICKY_DAT, poradove_cislo, crc, velkost_dat + VELKOST_HLAVICKY_DAT, flag)
     crc = crc32_func(hlavicka + data)
     if chyba:
@@ -84,14 +85,21 @@ def server_riadic():
         print("SERVER - Odmietnutie otvorenia spojenia z adresy {}".format(addr1))
         server_socket.sendto(b"ZAMIETNUTIE SPOJENIA S->K", addr1)
 
-    data2, addr2 = server_socket.recvfrom(1500)
-    if data2 == b"POTVRDENIE SPOJENIA K->S" and addr1 == addr2 and otvorenie:
-        print("SERVER - Prijatie potvrdenia spojenia z adresy {}".format(addr1))
+    if otvorenie:
         print("SERVER - Spojenie s {} bolo uspesne nadviazane".format(addr1))
     else:
-        print("SERVER - Prijatie zamietnutia spojenia z adresy {}".format(addr1))
         print("SERVER - Zatvaram spojenie")
         server_socket.close()
+        return
+
+    # data2, addr2 = server_socket.recvfrom(1500)
+    # if data2 == b"POTVRDENIE SPOJENIA K->S" and addr1 == addr2 and otvorenie:
+    #     print("SERVER - Prijatie potvrdenia spojenia z adresy {}".format(addr1))
+    #     print("SERVER - Spojenie s {} bolo uspesne nadviazane".format(addr1))
+    # else:
+    #     print("SERVER - Prijatie zamietnutia spojenia z adresy {}".format(addr1))
+    #     print("SERVER - Zatvaram spojenie")
+    #     server_socket.close()
 
     server_prijimac(server_socket, addr1)
     server_socket.close()
@@ -126,11 +134,11 @@ def klient_riadic():
     data, addr = klient_socket.recvfrom(1500)
     if addr == server_ip_port and data == b"OTVORENIE SPOJENIA S->K":
         print("KLIENT - Spojenie so serverom {} bolo uspesne nadviazane".format(addr))
-        klient_socket.sendto(b"POTVRDENIE SPOJENIA K->S", addr)
+        # klient_socket.sendto(b"POTVRDENIE SPOJENIA K->S", addr)
     else:
         print("KLIENT - Spojenie so serverom {} bolo zamietnute serverom".format(addr))
         print("KLIENT - Zatvaram spojenie")
-        klient_socket.sendto(b"POTVRDENIE SPOJENIA K->S", addr)
+        # klient_socket.sendto(b"POTVRDENIE SPOJENIA K->S", addr)
         klient_socket.close()
         return
 
@@ -152,6 +160,28 @@ def klient_vysielac(klient_socket, server_ip_port):
 
         sprava = input("Zadaj spravu na odoslanie: ")
 
+    # klient_socket.sendto(vytvor_datovy_paket(poradove_cislo, velkost_dat, ("a" * 0).encode()), server_ip_port)
+    # # OK 0
+    # klient_socket.sendto(vytvor_datovy_paket(poradove_cislo, velkost_dat, ("a" * 1).encode()), server_ip_port)
+    # # OK 1
+    # klient_socket.sendto(vytvor_datovy_paket(poradove_cislo, velkost_dat, ("a" * 10).encode()), server_ip_port)
+    # # OK 21
+    # klient_socket.sendto(vytvor_datovy_paket(poradove_cislo, velkost_dat, ("b" * 100).encode()), server_ip_port)
+    # # OK 111
+    # klient_socket.sendto(vytvor_datovy_paket(poradove_cislo, velkost_dat, ("c" * 1000).encode()), server_ip_port)
+    # # OK 1011
+    # klient_socket.sendto(vytvor_datovy_paket(poradove_cislo, velkost_dat, ("d" * 1459).encode()), server_ip_port)
+    # # OK 1470
+    # klient_socket.sendto(vytvor_datovy_paket(poradove_cislo, velkost_dat, ("e" * 1460).encode()), server_ip_port)
+    # # OK 1471
+    # klient_socket.sendto(vytvor_datovy_paket(poradove_cislo, velkost_dat, ("f" * 1461).encode()), server_ip_port)
+    # # OK 1472
+    # klient_socket.sendto(vytvor_datovy_paket(poradove_cislo, velkost_dat, ("g" * 1462).encode()), server_ip_port)
+    # # NOK 1473 - fragmentovane na linkovej vrstve
+    # klient_socket.sendto(vytvor_datovy_paket(poradove_cislo, velkost_dat, ("h" * 1463).encode()), server_ip_port)
+    # # NOK 1473 - fragmentovane na linkovej vrstve
+
+
     klient_socket.sendto(b"", server_ip_port)
 
 
@@ -172,6 +202,8 @@ def main():
     # data = b'abcde'
     # paket = vytvor_datovy_paket(0, len(data), data, chyba=False)
     # print(rozbal_datovy_paket(paket))
+    #
+    # print(MAX_DATA_SIZE)
 
     zaciatok_funkcie(main.__name__, False)
 
