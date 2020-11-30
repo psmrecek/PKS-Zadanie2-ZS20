@@ -7,3 +7,6 @@
 # Editor-based HTTP Client requests
 /httpRequests/
 /.idea
+/Smrecek_PKS_Zadanie2_SW_ARQ.spec
+/build/
+/dist/
