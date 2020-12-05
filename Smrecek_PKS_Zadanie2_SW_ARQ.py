@@ -22,7 +22,12 @@ crc32_func = crcmod.mkCrcFun(0x104c11db7, initCrc=0, xorOut=0xFFFFFFFF)
 
 
 def nacitaj_cislo(dolna_hranica, horna_hranica):
+    """Pomocna funkcia na nacitanie cisla s osetrenim hranic
 
+    :param dolna_hranica:
+    :param horna_hranica:
+    :return:
+    """
     while True:
         try:
             cislo = int(input("Zadaj cislo z intervalu <{} az {}>: ".format(dolna_hranica, horna_hranica)))
@@ -35,6 +40,14 @@ def nacitaj_cislo(dolna_hranica, horna_hranica):
 
 
 def vytvor_hlavicku(poradove_cislo, crc, spojena_velkost, flag):
+    """Funkcia na tvorbu hlavicky
+
+    :param poradove_cislo: hodnota pola Poradove cislo v hlavicke
+    :param crc: hodnota pola CRC v hlavicke
+    :param spojena_velkost: hodnota pola Velkost v hlavicke
+    :param flag: hodnota pola Flag v hlavicke
+    :return: vytvorena hlavicka
+    """
     hlavicka = b""
     hlavicka += poradove_cislo.to_bytes(4, 'big', signed=False)
     hlavicka += crc.to_bytes(4, 'big', signed=False)
@@ -44,17 +57,16 @@ def vytvor_hlavicku(poradove_cislo, crc, spojena_velkost, flag):
     return hlavicka
 
 
-def rozbal_hlavicku(hlavicka):
-    poradove_cislo = int.from_bytes(hlavicka[0:4], byteorder='big', signed=False)
-    crc = int.from_bytes(hlavicka[4:8], byteorder='big', signed=False)
-    celkova_velkost = int.from_bytes(hlavicka[8:10], byteorder='big', signed=False)
-    # flag = int.from_bytes(hlavicka[10:11], byteorder='big', signed=False)
-    flag = hlavicka[10:11]
-
-    return poradove_cislo, crc, celkova_velkost, flag
-
-
 def vytvor_datovy_paket(poradove_cislo, velkost_dat, data, flag, chyba=False):
+    """ Funkckcia na vytvorenie hlavicky k datam a ich spojenie
+
+    :param poradove_cislo: hodnota pola Poradove cislo v hlavicke
+    :param velkost_dat: velkost posielanych dat
+    :param data: posielane data
+    :param flag: hodnota pola Flag v hlavicke
+    :param chyba: boolean, ak True, paket bude poskodeny
+    :return: spojena hlavicka s datami
+    """
     crc = 0
 
     hlavicka = vytvor_hlavicku(poradove_cislo, crc, velkost_dat + VELKOST_HLAVICKY_DAT, flag)
@@ -68,7 +80,27 @@ def vytvor_datovy_paket(poradove_cislo, velkost_dat, data, flag, chyba=False):
     return vysledok
 
 
+def rozbal_hlavicku(hlavicka):
+    """ Pomocna funkcia na rozbalenie hlavicky
+
+    :param hlavicka: zabalena hlavicka v bajtoch
+    :return: poradove_cislo, crc, celkova_velkost, flag
+    """
+    poradove_cislo = int.from_bytes(hlavicka[0:4], byteorder='big', signed=False)
+    crc = int.from_bytes(hlavicka[4:8], byteorder='big', signed=False)
+    celkova_velkost = int.from_bytes(hlavicka[8:10], byteorder='big', signed=False)
+    # flag = int.from_bytes(hlavicka[10:11], byteorder='big', signed=False)
+    flag = hlavicka[10:11]
+
+    return poradove_cislo, crc, celkova_velkost, flag
+
+
 def rozbal_datovy_paket(paket):
+    """Pomocna funkcia na rozbalenie paketu
+
+    :param paket: zabaleny paket
+    :return: poradove_cislo, velkost_dat, flag, data, chyba
+    """
     poradove_cislo, crc, celkova_velkost, flag = rozbal_hlavicku(paket[:VELKOST_HLAVICKY_DAT])
     data = paket[VELKOST_HLAVICKY_DAT:]
     hlavicka = vytvor_hlavicku(poradove_cislo, 0, celkova_velkost, flag)
@@ -81,7 +113,230 @@ def rozbal_datovy_paket(paket):
     return poradove_cislo, velkost_dat, flag, data, chyba
 
 
+def zbal_potvrdzujuce_cislo(cislo_paketu):
+    """Pomocna funkcia na zabalenie potvrdzujuceho cisla paketu
+
+    :param cislo_paketu: pole Poradove cislo z hlavicky paketu, ktory sa ma potvrdit
+    :return: zabalene cislo
+    """
+    # data = b""
+    # for cislo in pole_poskodenych:
+    #     bajty = cislo.to_bytes(4, 'big', signed=False)
+    #     data += bajty
+
+    data = cislo_paketu.to_bytes(4, 'big', signed=False)
+
+    return data
+
+
+def rozbal_potvrdzujuce_cislo(data):
+    """Pomocna funkcia na rozbalenie potvrdzujuceho cisla paketu
+
+    :param data: zabalene cislo
+    :return: pole Poradove cislo z hlavicky paketu, ktory sa ma potvrdit
+    """
+    n = 4
+    cislo = int.from_bytes(data, byteorder='big', signed=False)
+    return cislo
+
+
+def posli_keepalive(klient_socket, server_ip_port, cas, ka_id):
+    """ Funkcia odosielajuca a zaznamenavajuca prijatie odpovede na keepalive
+
+    :param klient_socket: socekt, z ktoreho sa keepalive odosle
+    :param server_ip_port: adresa servera
+    :param cas: casovy interval posielania keepalive
+    :param ka_id: ID nite keepalive
+    :return:
+    """
+    print("KLIENT - posielanie keepalive spustene")
+    cislo_keepalive = 1
+
+    chybajuce = 0
+
+    while True:
+        global UKONCI
+        if UKONCI[ka_id]:
+            return
+
+        global AKTIVNY_SERVER
+        if not AKTIVNY_SERVER:
+            print("KLIENT - vypnuty server")
+            return
+
+        paket = vytvor_datovy_paket(cislo_keepalive, 0, b"", b"k")
+        klient_socket.sendto(paket, server_ip_port)
+        cislo_keepalive += 1
+        print("KLIENT - poslal som keepalive")
+
+        klient_socket.settimeout(KEEPALIVE_INTERVAL)
+        try:
+            data, addr = klient_socket.recvfrom(1500)
+            poradove_cislo, velkost_dat, flag, data, chyba = rozbal_datovy_paket(data)
+            if flag == b"k":
+                chybajuce = 0
+                print("KLIENT - prijal keepalive cislo: {}, "
+                      "velkost dat: {}, flag: {}, chyba: {}".format(poradove_cislo, velkost_dat, flag, chyba))
+                time.sleep(cas)
+            else:
+                chybajuce += 1
+        except socket.timeout:
+            chybajuce += 1
+            print("KLIENT - odpoved na keepalive neprisla v stanovenom case")
+        except ConnectionResetError:
+            print("KLIENT - vypnuty server")
+            AKTIVNY_SERVER = False
+            return
+
+        if chybajuce == 3:
+            print("KLIENT - server neaktivny")
+            AKTIVNY_SERVER = False
+            return
+
+
+def spusti_keepalive(klient_socket, server_ip_port, cas):
+    """Funkcia na vytvorenie vlastnej nite z ktorej sa bude posielat keepalive
+
+    :param klient_socket: socekt, z ktoreho sa keepalive odosle
+    :param server_ip_port: adresa servera
+    :param cas: casovy interval posielania keepalive
+    :return:
+    """
+    ukonci_keepalive()
+    global UKONCI
+    ka_id = len(UKONCI)
+    UKONCI.append(False)
+
+    thread = threading.Thread(target=posli_keepalive, args=(klient_socket, server_ip_port, cas, ka_id))
+    thread.daemon = True
+
+    thread.start()
+
+
+def ukonci_keepalive():
+    """Funkcia na ukoncenie vysielania vsetkych keepalive
+
+    :return:
+    """
+    global UKONCI
+    if sum(UKONCI) > 0:
+        print("KLIENT - posielanie keepalive zastavene")
+    UKONCI = [True for i in range(len(UKONCI))]
+
+
+def fragmentuj(data, velkost_fragment):
+    """Funkcia klienta na fragmentaciu dat pre potreby odosielania dat po castiach
+
+    :param data: data na rozfragmentovanie
+    :param velkost_fragment: maximalna velkost fragmentu
+    :return: pole fragmentov dat
+    """
+    dolna_hranica = 0
+    horna_hranica = 0
+    dlzka_dat = len(data)
+    pole_fragmentov = []
+    while horna_hranica < dlzka_dat:
+        horna_hranica += velkost_fragment
+        pole_fragmentov.append(data[dolna_hranica:horna_hranica])
+        dolna_hranica += velkost_fragment
+    return pole_fragmentov
+
+
+def retransmisia_sw(klient_socket, server_ip_port, poradove_cislo, velkost_dat, fragment, flag, chyba):
+    """Funkcia prijatia potvrdzujucej spravy a pripadneho opatovneho odoslania fragmentu
+    ARQ Stop & Wait funkcia. Server musi potvrdit kazdy jeden fragment, ak ho nepotvrdi, alebo potvrdi negativne,
+    fragment sa odosle znova.
+    :param klient_socket: socekt, z ktoreho sa keepalive odosle
+    :param server_ip_port: adresa servera
+    :param poradove_cislo: hodnota pola Poradove cislo v hlavicke
+    :param velkost_dat: velkost posielanych dat
+    :param fragment: posielane data
+    :param flag: hodnota pola Flag v hlavicke
+    :param chyba: True ak sa ma do opakovane posielaneho paketu vlozit chyba
+    :return: True ak server prijal paket, False ak server neprijal paket ani po opatovnom poslani
+    """
+    potvrdzujuce_flagy = b"an"
+    ack = False
+    klient_socket.settimeout(5)
+    opatovne_odoslanie = 0
+    while not ack:
+        try:
+            data2, addr2 = klient_socket.recvfrom(1500)
+            rozbalene = rozbal_datovy_paket(data2)
+            potvrdzujuci_flag = rozbalene[2]
+            potvrdzujuce_cislo = rozbal_potvrdzujuce_cislo(
+                rozbalene[3]) if potvrdzujuci_flag in potvrdzujuce_flagy else -1
+            while not ack:
+                if potvrdzujuce_cislo == poradove_cislo:
+                    if potvrdzujuci_flag == b"n":
+                        print("KLIENT - prijata negativna potvrdzujuca sprava, zacina retransmisia fragmentu ",
+                              potvrdzujuce_cislo)
+                        paket = vytvor_datovy_paket(poradove_cislo, velkost_dat, fragment, flag)
+                        klient_socket.sendto(paket, server_ip_port)
+                        print("KLIENT - opatovne odoslal fragment cislo: {}, "
+                              "velkost dat: {}, flag: {}, chyba: {}".format(poradove_cislo, velkost_dat, flag,
+                                                                            chyba))
+                    elif potvrdzujuci_flag == b"a":
+                        print("KLIENT - prijata pozitivna potvrdzujuca sprava pre fragment ", potvrdzujuce_cislo)
+                        ack = True
+                        break
+                    else:
+                        print("KLIENT - Prisla sprava so spravnym poradovym cislom, ale nespravnym flagom")
+                else:
+                    print("KLIENT - prijata sprava nebola ocakavana")
+                data2, addr2 = klient_socket.recvfrom(1500)
+                rozbalene = rozbal_datovy_paket(data2)
+                potvrdzujuci_flag = rozbalene[2]
+                potvrdzujuce_cislo = rozbal_potvrdzujuce_cislo(
+                    rozbalene[3]) if potvrdzujuci_flag in potvrdzujuce_flagy else -1
+        except socket.timeout:
+            if opatovne_odoslanie >= 3:
+                return False
+            print("KLIENT - potvrdenie zo serveru neprislo vcas, opatovne odosielam fragment", poradove_cislo)
+            paket = vytvor_datovy_paket(poradove_cislo, velkost_dat, fragment, flag)
+            klient_socket.sendto(paket, server_ip_port)
+            opatovne_odoslanie += 1
+        except ConnectionResetError:
+            print("KLIENT - server je neaktivny")
+            global AKTIVNY_SERVER
+            AKTIVNY_SERVER = False
+            return False
+    return True
+
+
+def chcem_chybu():
+    """Pomocna funkcia na zistenie najhlbsich tuzob pouzivatela
+
+    :return: boolean
+    """
+    while True:
+        vstup = input("Zadaj a pre vlozenie chyby, zadaj n pre nevlozenie chyby: ")
+        if vstup == "a":
+            return True
+        if vstup == "n":
+            return False
+        print("Nespravny vstup")
+
+
+def chcem_skoncit():
+    """Pomocna funkcia na zistenie, ci chce server ukoncit svoju cinnost
+
+    :return: boolean
+    """
+    while True:
+        vstup = input("Zadaj o pre odhlasenie, zadaj p pre pokracovanie: ")
+        if vstup == "o":
+            return True
+        if vstup == "p":
+            return False
+        print("Nespravny vstup")
+
+
 def server_riadic():
+    """Riadiaca funkcia prijimaca
+    Tato funkcia sluzi na otvorenie spojenia s klientom a nasledne zavola funkciu na prijimanie dat.
+    :return:
+    """
     print("SERVER - Zadaj port: ", end="")
     port = nacitaj_cislo(1024, 49151)
     # port = 1234
@@ -91,18 +346,22 @@ def server_riadic():
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     server_socket.bind(server_ip_port)
 
-    data, addr = server_socket.recvfrom(1500)
-    rozbalene = rozbal_datovy_paket(data)
     otvorenie = False
-    if rozbalene[2] == b"a":
-        print("SERVER - Prijatie otvorenia spojenia z adresy {}".format(addr))
-        inicializacny_paket = vytvor_datovy_paket(0, 0, b"", b"a")
-        server_socket.sendto(inicializacny_paket, addr)
-        otvorenie = True
-    else:
-        print("SERVER - Odmietnutie otvorenia spojenia z adresy {}".format(addr))
-        inicializacny_paket = vytvor_datovy_paket(0, 0, b"", b"g")
-        server_socket.sendto(inicializacny_paket, addr)
+
+    try:
+        data, addr = server_socket.recvfrom(1500)
+        rozbalene = rozbal_datovy_paket(data)
+        if rozbalene[2] == b"a":
+            print("SERVER - Prijatie otvorenia spojenia z adresy {}".format(addr))
+            inicializacny_paket = vytvor_datovy_paket(0, 0, b"", b"a")
+            server_socket.sendto(inicializacny_paket, addr)
+            otvorenie = True
+        else:
+            print("SERVER - Odmietnutie otvorenia spojenia z adresy {}".format(addr))
+            inicializacny_paket = vytvor_datovy_paket(0, 0, b"", b"g")
+            server_socket.sendto(inicializacny_paket, addr)
+    except OSError:
+        otvorenie = False
 
     if otvorenie:
         print("SERVER - Spojenie s {} bolo uspesne nadviazane".format(addr))
@@ -116,18 +375,17 @@ def server_riadic():
     server_socket.close()
 
 
-def zbal_potvrdzujuce_cislo(cislo_poskodeneho):
-    # data = b""
-    # for cislo in pole_poskodenych:
-    #     bajty = cislo.to_bytes(4, 'big', signed=False)
-    #     data += bajty
-
-    data = cislo_poskodeneho.to_bytes(4, 'big', signed=False)
-
-    return data
-
-
 def server_prijimac(server_socket, addr):
+    """Funkcia prijimania dat serverom
+    Server prijme spravu, zatriedi ju ci je signalizacna, alebo datova. Prijme data, zaradi ich do datovej struktury
+    podla ich poradoveho cisla a ak je prijaty posledny fragment, tak bud vypise textovu spravu na konzolu, alebo
+    ulozi subor na pouzivatelom zadanu cestu. V pripade nespravne dorucenych fragmentov si ich opatovne vyziada.
+    Zaznamenava explicitne ukoncenie spojenia zo strany klienta, ako aj implicitne skoncenie spojenia ukoncenim
+    posielania sprav keepalive.
+    :param server_socket: socket servera
+    :param addr: adresa klienta
+    :return:
+    """
 
     slovnik_fragmentov = {}
     celkovy_pocet_fragmentov = -2
@@ -284,72 +542,12 @@ def server_prijimac(server_socket, addr):
     print("SERVER - celkovo chybne prijatych dat bolo {} B".format(prijate_chybne_data_celkovo))
 
 
-def posli_keepalive(klient_socket, server_ip_port, cas, ka_id):
-    print("KLIENT - posielanie keepalive spustene")
-    cislo_keepalive = 1
-
-    chybajuce = 0
-
-    while True:
-        global UKONCI
-        if UKONCI[ka_id]:
-            return
-
-        paket = vytvor_datovy_paket(cislo_keepalive, 0, b"", b"k")
-        klient_socket.sendto(paket, server_ip_port)
-        cislo_keepalive += 1
-        print("KLIENT - poslal som keepalive")
-
-        global AKTIVNY_SERVER
-        if not AKTIVNY_SERVER:
-            print("KLIENT - vypnuty server")
-            return
-
-        klient_socket.settimeout(KEEPALIVE_INTERVAL)
-        try:
-            data, addr = klient_socket.recvfrom(1500)
-            poradove_cislo, velkost_dat, flag, data, chyba = rozbal_datovy_paket(data)
-            if flag == b"k":
-                chybajuce = 0
-                print("KLIENT - prijal keepalive cislo: {}, "
-                      "velkost dat: {}, flag: {}, chyba: {}".format(poradove_cislo, velkost_dat, flag, chyba))
-                time.sleep(cas)
-            else:
-                chybajuce += 1
-        except socket.timeout:
-            chybajuce += 1
-            print("KLIENT - odpoved na keepalive neprisla v stanovenom case")
-        except ConnectionResetError:
-            print("KLIENT - vypnuty server")
-            AKTIVNY_SERVER = False
-            return
-
-        if chybajuce == 3:
-            print("KLIENT - server neaktivny")
-            AKTIVNY_SERVER = False
-            return
-
-
-def spusti_keepalive(klient_socket, server_ip_port, cas):
-    ukonci_keepalive()
-    global UKONCI
-    ka_id = len(UKONCI)
-    UKONCI.append(False)
-
-    thread = threading.Thread(target=posli_keepalive, args=(klient_socket, server_ip_port, cas, ka_id))
-    thread.daemon = True
-
-    thread.start()
-
-
-def ukonci_keepalive():
-    global UKONCI
-    if sum(UKONCI) > 0:
-        print("KLIENT - posielanie keepalive zastavene")
-    UKONCI = [True for i in range(len(UKONCI))]
-
-
 def klient_riadic():
+    """Riadiaca funkcia odosielaca
+    Tato funkcia sluzi na otvorenie spojenia so serverom a nasledne vypise menu pre pouzivatela, ktory si postupne
+    v slucke vybera, co chce robit.
+    :return:
+    """
     ip_adresa_servera = input("KLIENT - Zadaj IP adresu servera: ")
     print("KLIENT - zadaj port: ", end="")
     port = nacitaj_cislo(1024, 49151)
@@ -368,7 +566,7 @@ def klient_riadic():
         klient_socket.sendto(inicializacny_paket, server_ip_port)
     except OSError:
         print("KLIENT - na zvolenu IP sa nepodarilo odoslat spravu")
-        print("KLIENT - Zatvaram spojenie")
+        print("KLIENT - zatvaram spojenie")
         klient_socket.close()
         return
 
@@ -376,16 +574,16 @@ def klient_riadic():
         data, addr = klient_socket.recvfrom(1500)
     except OSError:
         print("KLIENT - server neaktivny")
-        print("KLIENT - Zatvaram spojenie")
+        print("KLIENT - zatvaram spojenie")
         klient_socket.close()
         return
 
     rozbalene = rozbal_datovy_paket(data)
     if addr == server_ip_port and rozbalene[2] == b"a":
-        print("KLIENT - Spojenie so serverom {} bolo uspesne nadviazane".format(addr))
+        print("KLIENT - spojenie so serverom {} bolo uspesne nadviazane".format(addr))
     else:
-        print("KLIENT - Spojenie so serverom {} bolo zamietnute serverom".format(addr))
-        print("KLIENT - Zatvaram spojenie")
+        print("KLIENT - spojenie so serverom {} bolo zamietnute serverom".format(addr))
+        print("KLIENT - zatvaram spojenie")
         klient_socket.close()
         return
 
@@ -393,7 +591,7 @@ def klient_riadic():
     AKTIVNY_SERVER = True
 
     volba = "Zadaj t pre odoslanie textovej spravy, zadaj s pre odoslanie suboru, zadaj x pre odhlasenie, " \
-            "zadaj on pre spustenie keepalive, zadaj off pre ukoncenie posielania sprav keepalive: "
+            "zadaj on pre spustenie keepalive, zadaj off pre ukoncenie posielania sprav keepalive:\n"
     rezim = input(volba)
     while rezim != "x":
         if rezim == "t":
@@ -422,7 +620,7 @@ def klient_riadic():
             ukonci_keepalive()
         else:
             print("Nespravna volba")
-        time.sleep(1)
+        time.sleep(0.1)
         rezim = input(volba)
 
     ukonci_keepalive()
@@ -434,96 +632,16 @@ def klient_riadic():
     klient_socket.close()
 
 
-def rozbal_potvrdzujuce_cislo(data):
-    n = 4
-    cislo = int.from_bytes(data, byteorder='big', signed=False)
-    return cislo
-
-
-def fragmentuj(data, velkost_fragment):
-    dolna_hranica = 0
-    horna_hranica = 0
-    dlzka_dat = len(data)
-    pole_fragmentov = []
-    while horna_hranica < dlzka_dat:
-        horna_hranica += velkost_fragment
-        pole_fragmentov.append(data[dolna_hranica:horna_hranica])
-        dolna_hranica += velkost_fragment
-    return pole_fragmentov
-
-
-def retransmisia_sw(klient_socket, server_ip_port, poradove_cislo, velkost_dat, fragment, flag, chyba):
-    potvrdzujuce_flagy = b"an"
-    ack = False
-    klient_socket.settimeout(5)
-    opatovne_odoslanie = 0
-    while not ack:
-        try:
-            data2, addr2 = klient_socket.recvfrom(1500)
-            rozbalene = rozbal_datovy_paket(data2)
-            potvrdzujuci_flag = rozbalene[2]
-            potvrdzujuce_cislo = rozbal_potvrdzujuce_cislo(
-                rozbalene[3]) if potvrdzujuci_flag in potvrdzujuce_flagy else -1
-            while not ack:
-                if potvrdzujuce_cislo == poradove_cislo:
-                    if potvrdzujuci_flag == b"n":
-                        print("KLIENT - prijata negativna potvrdzujuca sprava, zacina retransmisia fragmentu ",
-                              potvrdzujuce_cislo)
-                        paket = vytvor_datovy_paket(poradove_cislo, velkost_dat, fragment, flag)
-                        klient_socket.sendto(paket, server_ip_port)
-                        print("KLIENT - opatovne odoslal fragment cislo: {}, "
-                              "velkost dat: {}, flag: {}, chyba: {}".format(poradove_cislo, velkost_dat, flag,
-                                                                            chyba))
-                    elif potvrdzujuci_flag == b"a":
-                        print("KLIENT - prijata pozitivna potvrdzujuca sprava pre fragment ", potvrdzujuce_cislo)
-                        ack = True
-                        break
-                    else:
-                        print("KLIENT - Prisla sprava so spravnym poradovym cislom, ale nespravnym flagom")
-                else:
-                    print("KLIENT - prijata sprava nebola ocakavana")
-                data2, addr2 = klient_socket.recvfrom(1500)
-                rozbalene = rozbal_datovy_paket(data2)
-                potvrdzujuci_flag = rozbalene[2]
-                potvrdzujuce_cislo = rozbal_potvrdzujuce_cislo(
-                    rozbalene[3]) if potvrdzujuci_flag in potvrdzujuce_flagy else -1
-        except socket.timeout:
-            if opatovne_odoslanie >= 3:
-                return False
-            print("KLIENT - potvrdenie zo serveru neprislo vcas, opatovne odosielam fragment", poradove_cislo)
-            paket = vytvor_datovy_paket(poradove_cislo, velkost_dat, fragment, flag)
-            klient_socket.sendto(paket, server_ip_port)
-            opatovne_odoslanie += 1
-        except ConnectionResetError:
-            print("KLIENT - server je neaktivny")
-            global AKTIVNY_SERVER
-            AKTIVNY_SERVER = False
-            return False
-    return True
-
-
-def chcem_chybu():
-    while True:
-        vstup = input("Zadaj a pre vlozenie chyby, zadaj n pre nevlozenie chyby: ")
-        if vstup == "a":
-            return True
-        if vstup == "n":
-            return False
-        print("Nespravny vstup")
-
-
-def chcem_skoncit():
-    while True:
-        vstup = input("Zadaj o pre odhlasenie, zadaj p pre pokracovanie: ")
-        if vstup == "o":
-            return True
-        if vstup == "p":
-            return False
-        print("Nespravny vstup")
-
-
 def klient_vysielac_text(klient_socket, server_ip_port, fragment_velkost):
-
+    """Funkcia na vysielanie textu klientom
+    Vyziada od pouzivatela spravu na odoslanie, v pripade potreby ju rozfragmentuje a odosle po fragmentoch. V pripade,
+    ze fragment nebol spravne doruceny, posle ho znova. Prvy az predposledny fragment su odosielane s flagom b,
+    posledny fragment je odosielany s flagom c. Ak si to pouzivatel zela, vlozi sa chyba do prveho datoveho fragmentu.
+    :param klient_socket: socekt, z ktoreho sa keepalive odosle
+    :param server_ip_port: adresa servera
+    :param fragment_velkost: maximalna velkost fragmentu
+    :return: True ak sa prenos podaril, False ak nie
+    """
     sprava = input("Zadaj spravu na odoslanie: ")
 
     chyba = chcem_chybu()
@@ -568,7 +686,16 @@ def klient_vysielac_text(klient_socket, server_ip_port, fragment_velkost):
 
 
 def klient_vysielac_subor(klient_socket, server_ip_port, fragment_velkost):
-
+    """Funkcia na vysielanie suboru klientom
+    Vyziada od pouzivatela cestu k suboru na odoslanie a samostatne odosle v signalizacnej sprave s flagom d nazov
+    suboru. V pripade potreby subor rozfragmentuje a odosle po fragmentoch. V pripade, ze fragment nebol spravne
+    doruceny, posle ho znova. Prvy az predposledny datovy fragment su odosielane s flagom e, posledny fragment je
+    odosielany s flagom f. Ak si to pouzivatel zela, vlozi sa chyba do prveho datoveho fragmentu.
+    :param klient_socket: socekt, z ktoreho sa keepalive odosle
+    :param server_ip_port: adresa servera
+    :param fragment_velkost: maximalna velkost fragmentu
+    :return: True ak sa prenos podaril, False ak nie
+    """
     data = b""
 
     while True:
