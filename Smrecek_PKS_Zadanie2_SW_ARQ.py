@@ -753,7 +753,10 @@ def klient_vysielac_subor(klient_socket, server_ip_port, fragment_velkost):
 
 
 def main():
+    """Hlavna funkcia programu obsahujuca volbu rezimu
 
+    :return:
+    """
     rezim = input("Zvol s pre server, zvol k pre klient, zvol x pre skoncenie programu: ")
     while rezim != "x":
         if rezim == "s":
