@@ -1,30 +1,8 @@
 import socket
-import struct
 import crcmod
 import os
 import threading
 import time
-
-
-def zaciatok_funkcie(funkcia, zac):
-    """
-    Pomocna debuggovacia funkcia ktora vypise ktora funkcia bola prave spustena a ukoncena.
-
-    :param funkcia: nazov funkcie
-    :param zac: boolean ci zacina alebo konci
-    :return:
-    """
-
-    if zac:
-        text = "# Zaciatok funkcie {} #".format(funkcia)
-    else:
-        text = "# Koniec funkcie {} #".format(funkcia)
-
-    ram = "#" * (len(text))
-
-    print(ram)
-    print(text)
-    print(ram)
 
 
 IP_HEADER_LENGTH = 20
@@ -32,8 +10,7 @@ UDP_HEADER_LENGTH = 8
 ETH_II_PAYLOAD = 1500
 MAX_SIZE_ON_WIRE = ETH_II_PAYLOAD - IP_HEADER_LENGTH - UDP_HEADER_LENGTH
 
-FORMAT_HLAVICKY_DAT = "IIhc"
-VELKOST_HLAVICKY_DAT = struct.calcsize(FORMAT_HLAVICKY_DAT)
+VELKOST_HLAVICKY_DAT = 11
 MAX_DATA_SIZE = MAX_SIZE_ON_WIRE - VELKOST_HLAVICKY_DAT
 MIN_DATA_SIZE = 1
 
@@ -105,7 +82,8 @@ def rozbal_datovy_paket(paket):
 
 
 def server_riadic():
-    port = int(input("SERVER - Zadaj port: "))
+    print("SERVER - Zadaj port: ", end="")
+    port = nacitaj_cislo(1024, 49151)
     # port = 1234
     print("SERVER - Zvoleny port", port)
     server_ip_port = ("", port)
@@ -159,7 +137,23 @@ def server_prijimac(server_socket, addr):
 
     cislo_potvrdzovacej_spravy = 1
     cislo_keepalive = 1
-    celkovy_pocet_paketov = 1
+    celkovy_pocet_paketov = 0
+
+    prijate_data_ciastkovo = 0
+    prijate_data_celkovo = 0
+
+    prijate_spravne_data_ciastkovo = 0
+    prijate_spravne_data_celkovo = 0
+
+    prijate_chybne_data_ciastkovo = 0
+    prijate_chybne_data_celkovo = 0
+
+    prijate_chybne_pakety_ciastkovo = 0
+    prijate_chybne_pakety_celkovo = 0
+
+    prijate_spravne_pakety_ciastkovo = 0
+    prijate_spravne_pakety_celkovo = 0
+
 
     server_socket.settimeout(3 * KEEPALIVE_INTERVAL)
     try:
@@ -168,14 +162,16 @@ def server_prijimac(server_socket, addr):
             poradove_cislo, velkost_dat, flag, data, chyba = rozbal_datovy_paket(paket)
 
             if flag == b"k":
+                celkovy_pocet_paketov += 1
                 print("SERVER - {}: prijal keepalive cislo: {}, "
                       "velkost dat: {}, flag: {}, chyba: {}".format(celkovy_pocet_paketov, poradove_cislo, velkost_dat,
                                                                     flag, chyba))
-                celkovy_pocet_paketov += 1
                 keepalive_paket = vytvor_datovy_paket(cislo_keepalive, 0, b"", b"k")
                 server_socket.sendto(keepalive_paket, addr)
                 cislo_keepalive += 1
                 continue
+
+            celkovy_pocet_paketov += 1
 
             if flag not in datove_flagy:
                 print("SERVER - {}: prijal signalizacnu spravu cislo: {}, "
@@ -185,14 +181,25 @@ def server_prijimac(server_socket, addr):
                 print("SERVER - {}: prijal fragment cislo: {}, "
                     "velkost dat: {}, flag: {}, chyba: {}".format(celkovy_pocet_paketov, poradove_cislo, velkost_dat,
                                                                   flag, chyba))
-            celkovy_pocet_paketov += 1
+
             if flag in datove_flagy:
+                prijate_data_celkovo += len(data)
+                prijate_data_ciastkovo += len(data)
                 potvrdzujuce_cislo = zbal_potvrdzujuce_cislo(poradove_cislo)
                 if chyba:
                     potvrdzovaci_paket = vytvor_datovy_paket(cislo_potvrdzovacej_spravy, len(potvrdzujuce_cislo), potvrdzujuce_cislo, b"n")
+                    prijate_chybne_pakety_celkovo += 1
+                    prijate_chybne_pakety_ciastkovo += 1
+                    prijate_chybne_data_celkovo += len(data)
+                    prijate_chybne_data_ciastkovo += len(data)
                 else:
                     potvrdzovaci_paket = vytvor_datovy_paket(cislo_potvrdzovacej_spravy, len(potvrdzujuce_cislo), potvrdzujuce_cislo, b"a")
                     slovnik_fragmentov[poradove_cislo] = data
+                    prijate_spravne_pakety_celkovo += 1
+                    prijate_spravne_pakety_ciastkovo += 1
+                    prijate_spravne_data_celkovo += len(data)
+                    prijate_spravne_data_ciastkovo += len(data)
+
                 server_socket.sendto(potvrdzovaci_paket, addr)
 
             if flag == b"d":
@@ -200,6 +207,11 @@ def server_prijimac(server_socket, addr):
 
             if flag == b"g":
                 print("SERVER - klient ukoncil spojenie")
+                print("SERVER - celkovo bolo prijatych {} spravnych fragmentov".format(prijate_spravne_pakety_celkovo))
+                print("SERVER - celkovo bolo prijatych {} chybnych fragmentov".format(prijate_chybne_pakety_celkovo))
+                print("SERVER - celkovo bolo prijatych {} B dat".format(prijate_data_celkovo))
+                print("SERVER - celkovo spravne prijatych dat bolo {} B".format(prijate_spravne_data_celkovo))
+                print("SERVER - celkovo chybne prijatych dat bolo {} B".format(prijate_chybne_data_celkovo))
                 break
 
             if flag == b"d" or flag == b"e" or flag == b"f":
@@ -213,12 +225,21 @@ def server_prijimac(server_socket, addr):
                     sprava = b""
                     for i in range(1, celkovy_pocet_fragmentov + 1):
                         sprava += slovnik_fragmentov[i]
+                    print("SERVER - sprava sa sklada z {} fragmentov".format(celkovy_pocet_fragmentov))
+                    print("SERVER - bolo prijatych {} spravnych fragmentov".format(prijate_spravne_pakety_ciastkovo))
+                    print("SERVER - bolo prijatych {} chybnych fragmentov".format(prijate_chybne_pakety_ciastkovo))
+                    print("SERVER - bolo prijatych {} B dat".format(prijate_data_ciastkovo))
+                    print("SERVER - spravne prijatych dat bolo {} B".format(prijate_spravne_data_ciastkovo))
+                    print("SERVER - chybne prijatych dat bolo {} B".format(prijate_chybne_data_ciastkovo))
+                    prijate_spravne_pakety_ciastkovo, prijate_chybne_pakety_ciastkovo, prijate_data_ciastkovo = 0, 0, 0
+                    prijate_spravne_data_ciastkovo, prijate_chybne_data_ciastkovo = 0, 0
                     print("SERVER - cele znenie spravy:")
                     print(sprava.decode("utf-8"))
                     slovnik_fragmentov.clear()
                     celkovy_pocet_fragmentov = -2
                     if chcem_skoncit():
-                        return
+                        break
+
             elif len(slovnik_fragmentov) == celkovy_pocet_fragmentov + 1:
                 nazov_suboru = slovnik_fragmentov[0].decode("utf-8")
                 while True:
@@ -234,14 +255,33 @@ def server_prijimac(server_socket, addr):
                     subor.write(slovnik_fragmentov[i])
                 subor.close()
                 print("Cesta k suboru je:", cesta)
+                print("SERVER - sprava sa sklada z {} fragmentov".format(celkovy_pocet_fragmentov))
+                print("SERVER - bolo prijatych {} spravnych fragmentov".format(prijate_spravne_pakety_ciastkovo))
+                print("SERVER - bolo prijatych {} chybnych fragmentov".format(prijate_chybne_pakety_ciastkovo))
+                print("SERVER - bolo prijatych {} B dat".format(prijate_data_ciastkovo))
+                print("SERVER - spravne prijatych dat bolo {} B".format(prijate_spravne_data_ciastkovo))
+                print("SERVER - chybne prijatych dat bolo {} B".format(prijate_chybne_data_ciastkovo))
+                prijate_spravne_pakety_ciastkovo, prijate_chybne_pakety_ciastkovo, prijate_data_ciastkovo = 0, 0, 0
+                prijate_spravne_data_ciastkovo, prijate_chybne_data_ciastkovo = 0, 0
                 slovnik_fragmentov.clear()
                 celkovy_pocet_fragmentov = -2
                 textova_sprava = True
                 if chcem_skoncit():
-                    return
+                    break
 
     except socket.timeout:
         print("SERVER - ukoncenie spojenia z dovodu neaktivity klienta")
+        print("SERVER - celkovo bolo prijatych {} spravnych fragmentov".format(prijate_spravne_pakety_celkovo))
+        print("SERVER - celkovo bolo prijatych {} chybnych fragmentov".format(prijate_chybne_pakety_celkovo))
+        print("SERVER - celkovo bolo prijatych {} B dat".format(prijate_data_celkovo))
+        print("SERVER - celkovo spravne prijatych dat bolo {} B".format(prijate_spravne_data_celkovo))
+        print("SERVER - celkovo chybne prijatych dat bolo {} B".format(prijate_chybne_data_celkovo))
+
+    print("SERVER - celkovo bolo prijatych {} spravnych fragmentov".format(prijate_spravne_pakety_celkovo))
+    print("SERVER - celkovo bolo prijatych {} chybnych fragmentov".format(prijate_chybne_pakety_celkovo))
+    print("SERVER - celkovo bolo prijatych {} B dat".format(prijate_data_celkovo))
+    print("SERVER - celkovo spravne prijatych dat bolo {} B".format(prijate_spravne_data_celkovo))
+    print("SERVER - celkovo chybne prijatych dat bolo {} B".format(prijate_chybne_data_celkovo))
 
 
 def posli_keepalive(klient_socket, server_ip_port, cas, ka_id):
@@ -261,6 +301,9 @@ def posli_keepalive(klient_socket, server_ip_port, cas, ka_id):
         print("KLIENT - poslal som keepalive")
 
         global AKTIVNY_SERVER
+        if not AKTIVNY_SERVER:
+            print("KLIENT - vypnuty server")
+            return
 
         klient_socket.settimeout(KEEPALIVE_INTERVAL)
         try:
@@ -358,7 +401,8 @@ def klient_riadic():
                 ukonci_keepalive()
                 print("Zadaj velkost datoveho fragmentu")
                 fragment_velkost = nacitaj_cislo(MIN_DATA_SIZE, MAX_DATA_SIZE)
-                klient_vysielac_text(klient_socket, server_ip_port, fragment_velkost)
+                navrat = klient_vysielac_text(klient_socket, server_ip_port, fragment_velkost)
+                AKTIVNY_SERVER = navrat
                 spusti_keepalive(klient_socket, server_ip_port, KEEPALIVE_INTERVAL)
             else:
                 print("KLIENT - neaktivny server, odhlaste sa")
@@ -367,7 +411,8 @@ def klient_riadic():
                 ukonci_keepalive()
                 print("Zadaj velkost datoveho fragmentu")
                 fragment_velkost = nacitaj_cislo(MIN_DATA_SIZE, MAX_DATA_SIZE)
-                klient_vysielac_subor(klient_socket, server_ip_port, fragment_velkost)
+                navrat = klient_vysielac_subor(klient_socket, server_ip_port, fragment_velkost)
+                AKTIVNY_SERVER = navrat
                 spusti_keepalive(klient_socket, server_ip_port, KEEPALIVE_INTERVAL)
             else:
                 print("KLIENT - neaktivny server, odhlaste sa")
@@ -411,6 +456,7 @@ def retransmisia_sw(klient_socket, server_ip_port, poradove_cislo, velkost_dat, 
     potvrdzujuce_flagy = b"an"
     ack = False
     klient_socket.settimeout(5)
+    opatovne_odoslanie = 0
     while not ack:
         try:
             data2, addr2 = klient_socket.recvfrom(1500)
@@ -442,9 +488,12 @@ def retransmisia_sw(klient_socket, server_ip_port, poradove_cislo, velkost_dat, 
                 potvrdzujuce_cislo = rozbal_potvrdzujuce_cislo(
                     rozbalene[3]) if potvrdzujuci_flag in potvrdzujuce_flagy else -1
         except socket.timeout:
-            print("KLIENT - potvrdenie zo servra neprislo vcas, opatovne odosielam fragment", poradove_cislo)
+            if opatovne_odoslanie >= 3:
+                return False
+            print("KLIENT - potvrdenie zo serveru neprislo vcas, opatovne odosielam fragment", poradove_cislo)
             paket = vytvor_datovy_paket(poradove_cislo, velkost_dat, fragment, flag)
             klient_socket.sendto(paket, server_ip_port)
+            opatovne_odoslanie += 1
         except ConnectionResetError:
             print("KLIENT - server je neaktivny")
             global AKTIVNY_SERVER
@@ -496,7 +545,9 @@ def klient_vysielac_text(klient_socket, server_ip_port, fragment_velkost):
               "velkost dat: {}, flag: {}, chyba: {}".format(poradove_cislo, velkost_dat, flag, chyba))
 
         if not retransmisia_sw(klient_socket, server_ip_port, poradove_cislo, velkost_dat, fragment, flag, chyba):
-            return
+            print("KLIENT - retransmisia zlyhala")
+            print("KLIENT - odhlasenie")
+            return False
 
         poradove_cislo += 1
 
@@ -509,9 +560,11 @@ def klient_vysielac_text(klient_socket, server_ip_port, fragment_velkost):
           "velkost dat: {}, flag: {}, chyba: {}".format(poradove_cislo, velkost_dat, flag, chyba))
 
     if not retransmisia_sw(klient_socket, server_ip_port, poradove_cislo, velkost_dat, fragment, flag, chyba):
-        return
+        print("KLIENT - retransmisia zlyhala")
+        print("KLIENT - odhlasenie")
+        return False
 
-    return
+    return True
 
 
 def klient_vysielac_subor(klient_socket, server_ip_port, fragment_velkost):
@@ -550,7 +603,9 @@ def klient_vysielac_subor(klient_socket, server_ip_port, fragment_velkost):
               "velkost dat: {}, flag: {}, chyba: {}".format(poradove_cislo, velkost_dat, flag, chyba))
 
         if not retransmisia_sw(klient_socket, server_ip_port, poradove_cislo, velkost_dat, fragment, flag, chyba):
-            return
+            print("KLIENT - retransmisia zlyhala")
+            print("KLIENT - odhlasenie")
+            return False
 
         poradove_cislo += 1
 
@@ -563,13 +618,14 @@ def klient_vysielac_subor(klient_socket, server_ip_port, fragment_velkost):
           "velkost dat: {}, flag: {}, chyba: {}".format(poradove_cislo, velkost_dat, flag, chyba))
 
     if not retransmisia_sw(klient_socket, server_ip_port, poradove_cislo, velkost_dat, fragment, flag, chyba):
-        return
+        print("KLIENT - retransmisia zlyhala")
+        print("KLIENT - odhlasenie")
+        return False
 
-    return
+    return True
 
 
 def main():
-    zaciatok_funkcie(main.__name__, True)
 
     rezim = input("Zvol s pre server, zvol k pre klient, zvol x pre skoncenie programu: ")
     while rezim != "x":
@@ -580,8 +636,6 @@ def main():
         else:
             print("Nespravna volba")
         rezim = input("Zvol s pre server, zvol k pre klient, zvol x pre skoncenie programu: ")
-
-    zaciatok_funkcie(main.__name__, False)
 
 
 if __name__ == "__main__":
